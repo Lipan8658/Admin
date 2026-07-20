@@ -1,0 +1,100 @@
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+import { getFirestore, collection, addDoc, doc, setDoc, arrayUnion, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+// Your Firebase Configuration
+const firebaseConfig = {
+  apiKey: "AIzaSyA4g6gTCvbYVu_r-x7piDWIOcBwK3GHors",
+  authDomain: "fnixx-3d87b.firebaseapp.com",
+  projectId: "fnixx-3d87b",
+  storageBucket: "fnixx-3d87b.firebasestorage.app",
+  messagingSenderId: "530725398073",
+  appId: "1:530725398073:web:5f9b574032dafc91accfe8",
+  measurementId: "G-T7M48H1S1E" // Added missing closing quote from your prompt
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+// DOM Elements
+const loginPage = document.getElementById('login-page');
+const dashboardPage = document.getElementById('dashboard-page');
+const loginBtn = document.getElementById('login-btn');
+const logoutBtn = document.getElementById('logout-btn');
+const userProfile = document.getElementById('user-profile');
+const form = document.getElementById('add-supplier-form');
+
+// --- Authentication Logic ---
+
+const provider = new GoogleAuthProvider();
+
+loginBtn.addEventListener('click', () => {
+  signInWithPopup(auth, provider).catch(error => alert(error.message));
+});
+
+logoutBtn.addEventListener('click', () => {
+  signOut(auth).catch(error => alert(error.message));
+});
+
+onAuthStateChanged(auth, (user) => {
+  if (user) {
+    loginPage.classList.add('hidden');
+    dashboardPage.classList.remove('hidden');
+    userProfile.innerHTML = `👤 ${user.displayName}<br><span class="text-xs text-gray-400">${user.email}</span>`;
+  } else {
+    loginPage.classList.remove('hidden');
+    dashboardPage.classList.add('hidden');
+  }
+});
+
+// --- Database Logic ---
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  
+  // Gather form data
+  const supplierData = {
+    name: document.getElementById('sup-name').value,
+    ownerName: document.getElementById('sup-owner').value,
+    phone: document.getElementById('sup-phone').value,
+    state: document.getElementById('sup-state').value,
+    city: document.getElementById('sup-city').value,
+    Area: document.getElementById('sup-area').value,
+    pricePerMonth: parseFloat(document.getElementById('sup-price').value) || 0,
+    createdAt: serverTimestamp(),
+    isActive: true,
+    isVerified: true,
+    // Add defaults for arrays/maps to match your schema
+    deliveryAreas: [],
+    imageUrls: [],
+    mealPlans: [],
+    menuCatalog: [],
+    timings: { lunch: "12:00 PM - 2:00 PM", dinner: "7:30 PM - 9:30 PM" }
+  };
+
+  try {
+    // 1. Add to 'suppliers' collection
+    const docRef = await addDoc(collection(db, "suppliers"), supplierData);
+    console.log("Supplier written with ID: ", docRef.id);
+
+    // 2. Update the 'locations' collection hierarchy
+    // Path: locations > [State] > cities (map) > [City] (array) > [Area]
+    const locationRef = doc(db, "locations", supplierData.state);
+    
+    // Using setDoc with { merge: true } ensures we don't overwrite existing cities in the state
+    await setDoc(locationRef, {
+      cities: {
+        [supplierData.city]: arrayUnion(supplierData.Area)
+      }
+    }, { merge: true });
+
+    alert("Supplier added and locations updated successfully!");
+    form.reset();
+
+  } catch (error) {
+    console.error("Error adding document: ", error);
+    alert("Error adding document. Check console.");
+  }
+});
