@@ -1,8 +1,9 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-import { getFirestore, collection, addDoc, doc, setDoc, arrayUnion, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { getFirestore, collection, doc, setDoc, getDocs, arrayUnion, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
 
-// Your Firebase Configuration
+// --- Firebase Configuration ---
 const firebaseConfig = {
   apiKey: "AIzaSyA4g6gTCvbYVu_r-x7piDWIOcBwK3GHors",
   authDomain: "fnixx-3d87b.firebaseapp.com",
@@ -10,91 +11,200 @@ const firebaseConfig = {
   storageBucket: "fnixx-3d87b.firebasestorage.app",
   messagingSenderId: "530725398073",
   appId: "1:530725398073:web:5f9b574032dafc91accfe8",
-  measurementId: "G-T7M48H1S1E" // Added missing closing quote from your prompt
+  measurementId: "G-T7M48H1S1E"
 };
 
-// Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const storage = getStorage(app);
 
-// DOM Elements
+// --- DOM Elements ---
 const loginPage = document.getElementById('login-page');
-const dashboardPage = document.getElementById('dashboard-page');
-const loginBtn = document.getElementById('login-btn');
-const logoutBtn = document.getElementById('logout-btn');
+const mainApp = document.getElementById('main-app');
 const userProfile = document.getElementById('user-profile');
-const form = document.getElementById('add-supplier-form');
+
+const viewDashboard = document.getElementById('view-dashboard');
+const viewAddSupplier = document.getElementById('view-add-supplier');
+const navDashboard = document.getElementById('nav-dashboard');
+const navAdd = document.getElementById('nav-add');
+const gridContainer = document.getElementById('suppliers-grid');
+
+// --- Navigation Logic ---
+function switchView(view) {
+  if (view === 'dashboard') {
+    viewDashboard.classList.remove('hidden');
+    viewAddSupplier.classList.add('hidden');
+    navDashboard.classList.add('bg-gray-800');
+    navAdd.classList.remove('bg-gray-800');
+    loadSuppliers(); // Refresh data when navigating to dashboard
+  } else if (view === 'add') {
+    viewAddSupplier.classList.remove('hidden');
+    viewDashboard.classList.add('hidden');
+    navAdd.classList.add('bg-gray-800');
+    navDashboard.classList.remove('bg-gray-800');
+  }
+}
+
+navDashboard.addEventListener('click', () => switchView('dashboard'));
+navAdd.addEventListener('click', () => switchView('add'));
+document.getElementById('refresh-data-btn').addEventListener('click', loadSuppliers);
 
 // --- Authentication Logic ---
-
 const provider = new GoogleAuthProvider();
 
-loginBtn.addEventListener('click', () => {
-  signInWithPopup(auth, provider).catch(error => alert(error.message));
+document.getElementById('login-btn').addEventListener('click', () => {
+  signInWithPopup(auth, provider).catch(error => alert("Login Failed: " + error.message));
 });
 
-logoutBtn.addEventListener('click', () => {
+document.getElementById('logout-btn').addEventListener('click', () => {
   signOut(auth).catch(error => alert(error.message));
 });
 
 onAuthStateChanged(auth, (user) => {
   if (user) {
     loginPage.classList.add('hidden');
-    dashboardPage.classList.remove('hidden');
-    userProfile.innerHTML = `👤 ${user.displayName}<br><span class="text-xs text-gray-400">${user.email}</span>`;
+    mainApp.classList.remove('hidden');
+    userProfile.innerHTML = `<img src="${user.photoURL}" class="w-8 h-8 rounded-full border border-gray-500"> 
+                             <div><p class="font-bold leading-tight">${user.displayName}</p>
+                             <p class="text-xs text-gray-400">${user.email}</p></div>`;
+    loadSuppliers(); // Load data on successful login
   } else {
     loginPage.classList.remove('hidden');
-    dashboardPage.classList.add('hidden');
+    mainApp.classList.add('hidden');
   }
 });
 
-// --- Database Logic ---
+// --- Read Data (Dashboard) ---
+async function loadSuppliers() {
+  gridContainer.innerHTML = '<p class="text-gray-500 col-span-full">Loading suppliers...</p>';
+  try {
+    const querySnapshot = await getDocs(collection(db, "suppliers"));
+    gridContainer.innerHTML = '';
+    
+    if (querySnapshot.empty) {
+      gridContainer.innerHTML = '<p class="text-gray-500 col-span-full">No suppliers found.</p>';
+      return;
+    }
+
+    querySnapshot.forEach((doc) => {
+      const data = doc.data();
+      // Apply the custom puppet-style image rendering class
+      const imgTag = data.imageUrl 
+        ? `<img src="${data.imageUrl}" alt="${data.name}" class="puppet-img mb-4">`
+        : `<div class="puppet-img mb-4 bg-gray-200 flex items-center justify-center text-gray-400">No Image</div>`;
+
+      const card = document.createElement('div');
+      card.className = "bg-white p-5 rounded-xl shadow-md border border-gray-100";
+      card.innerHTML = `
+        ${imgTag}
+        <h3 class="text-xl font-bold">${data.name || 'Unnamed'}</h3>
+        <p class="text-gray-600 text-sm mb-2">👤 ${data.ownerName || 'N/A'} | 📞 ${data.phone || 'N/A'}</p>
+        <p class="text-gray-800 font-semibold mb-2">₹${data.pricePerMonth || 0} / month</p>
+        <div class="inline-block bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded">
+          📍 ${data.Area || ''}, ${data.city || ''}
+        </div>
+      `;
+      gridContainer.appendChild(card);
+    });
+  } catch (error) {
+    console.error("Error fetching suppliers:", error);
+    gridContainer.innerHTML = `<p class="text-red-500 col-span-full">Error loading data. ${error.message}</p>`;
+  }
+}
+
+// --- Write Data (Add Supplier Form) ---
+const form = document.getElementById('add-supplier-form');
+const submitBtn = form.querySelector('button[type="submit"]');
+const uploadStatus = document.getElementById('upload-status');
 
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
   
-  // Gather form data
-  const supplierData = {
-    name: document.getElementById('sup-name').value,
-    ownerName: document.getElementById('sup-owner').value,
-    phone: document.getElementById('sup-phone').value,
-    state: document.getElementById('sup-state').value,
-    city: document.getElementById('sup-city').value,
-    Area: document.getElementById('sup-area').value,
-    pricePerMonth: parseFloat(document.getElementById('sup-price').value) || 0,
-    createdAt: serverTimestamp(),
-    isActive: true,
-    isVerified: true,
-    // Add defaults for arrays/maps to match your schema
-    deliveryAreas: [],
-    imageUrls: [],
-    mealPlans: [],
-    menuCatalog: [],
-    timings: { lunch: "12:00 PM - 2:00 PM", dinner: "7:30 PM - 9:30 PM" }
-  };
+  submitBtn.disabled = true;
+  uploadStatus.classList.remove('hidden');
+  uploadStatus.textContent = "Processing images...";
 
   try {
-    // 1. Add to 'suppliers' collection
-    const docRef = await addDoc(collection(db, "suppliers"), supplierData);
-    console.log("Supplier written with ID: ", docRef.id);
+    const newSupplierRef = doc(collection(db, "suppliers"));
+    const fileInput = document.getElementById('sup-images');
+    const files = fileInput.files;
+    let uploadedUrls = [];
 
-    // 2. Update the 'locations' collection hierarchy
-    // Path: locations > [State] > cities (map) > [City] (array) > [Area]
-    const locationRef = doc(db, "locations", supplierData.state);
+    if (files.length > 0) {
+      for (let i = 0; i < files.length; i++) {
+        uploadStatus.textContent = `Uploading image ${i + 1} of ${files.length}...`;
+        const file = files[i];
+        const storageRef = ref(storage, `suppliers/${newSupplierRef.id}/${file.name}`);
+        await uploadBytes(storageRef, file);
+        const downloadUrl = await getDownloadURL(storageRef);
+        uploadedUrls.push(downloadUrl);
+      }
+    }
+
+    uploadStatus.textContent = "Saving to database...";
+
+    // Construct full address
+    const area = document.getElementById('sup-area').value;
+    const city = document.getElementById('sup-city').value;
+    const state = document.getElementById('sup-state').value;
+    const fullAddress = `${area}, ${city}, ${state}`;
+
+    const supplierData = {
+      name: document.getElementById('sup-name').value,
+      ownerName: document.getElementById('sup-owner').value,
+      phone: document.getElementById('sup-phone').value,
+      whatsapp: document.getElementById('sup-phone').value,
+      state: state,
+      city: city,
+      Area: area,
+      fullAddress: fullAddress,
+      pricePerMonth: parseFloat(document.getElementById('sup-price').value) || 0,
+      pricePerMeal: (parseFloat(document.getElementById('sup-price').value) || 0) / 30, // Assuming 30 days
+      createdAt: serverTimestamp(),
+      isActive: true,
+      isVerified: true,
+      isCustomizable: false,
+      trialAvailable: true,
+      underReview: false,
+      serviceType: "both",
+      foodType: "nonVeg",
+      rating: 0,
+      ratingCount: 0,
+      imageUrl: uploadedUrls.length > 0 ? uploadedUrls[0] : "",
+      imageUrls: uploadedUrls,
+      deliveryAreas: [],
+      mealPlans: [],
+      menuCatalog: [],
+      timings: { lunch: "12:00 PM - 2:00 PM", dinner: "7:30 PM - 9:30 PM" }
+    };
+
+    // Save to suppliers collection
+    await setDoc(newSupplierRef, supplierData);
     
-    // Using setDoc with { merge: true } ensures we don't overwrite existing cities in the state
+    // Update locations collection map
+    const locationRef = doc(db, "locations", state);
     await setDoc(locationRef, {
       cities: {
-        [supplierData.city]: arrayUnion(supplierData.Area)
+        [city]: arrayUnion(area)
       }
     }, { merge: true });
 
-    alert("Supplier added and locations updated successfully!");
-    form.reset();
+    uploadStatus.textContent = "✅ Successfully added!";
+    uploadStatus.classList.replace('text-blue-600', 'text-green-600');
+    
+    setTimeout(() => {
+      uploadStatus.classList.add('hidden');
+      uploadStatus.classList.replace('text-green-600', 'text-blue-600');
+      form.reset();
+      switchView('dashboard'); // Auto-navigate back to dashboard
+    }, 2000);
 
   } catch (error) {
-    console.error("Error adding document: ", error);
-    alert("Error adding document. Check console.");
+    console.error("Error saving data: ", error);
+    uploadStatus.textContent = "❌ Error saving document: " + error.message;
+    uploadStatus.classList.replace('text-blue-600', 'text-red-600');
+  } finally {
+    submitBtn.disabled = false;
   }
 });
